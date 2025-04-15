@@ -3,175 +3,357 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type EnigmaSolver struct {
-	APIKey  string
-	Timeout time.Duration
-	Client  *http.Client
+	baseURL string
+	apiKey  string
+	timeout int
+	client  *http.Client
 }
+
+type Proxy struct {
+	proxyStr        string
+	proxyType       string
+	parsedProxyDict map[string]interface{}
+}
+
+type ProxyType struct{}
 
 type Result struct {
-	Status   string `json:"status"`
-	Solved   bool   `json:"solved"`
-	ErrorId  string `json:"errorId"`
-	Error    string `json:"errorDescription"`
-	Solution string `json:"solution.gRecaptchaResponse"`
+	Status   string
+	Solved   bool
+	ErrorId  string
+	Error    string
+	Solution string
 }
 
-type CaptchaType string
+type CaptchaType struct{}
 
-const (
-	RecaptchaV2           CaptchaType = "RecaptchaV2TaskProxyless"
-	RecaptchaV3           CaptchaType = "RecaptchaV3TaskProxyless"
-	RecaptchaV2Enterprise CaptchaType = "RecaptchaV2EnterpriseTaskProxyless"
-	RecaptchaV3Enterprise CaptchaType = "RecaptchaV3EnterpriseTaskProxyless"
-)
+func (pt *ProxyType) HTTP() string   { return "http" }
+func (pt *ProxyType) SOCKS4() string { return "socks4" }
+func (pt *ProxyType) SOCKS5() string { return "socks5" }
+
+func (ct *CaptchaType) RecaptchaV3() string           { return "RecaptchaV3Task" }
+func (ct *CaptchaType) RecaptchaV2Enterprise() string { return "RecaptchaV2EnterpriseTask" }
+func (ct *CaptchaType) RecaptchaV3Enterprise() string { return "RecaptchaV3EnterpriseTask" }
+func (ct *CaptchaType) RecaptchaV2Proxyless() string  { return "RecaptchaV2TaskProxyless" }
+func (ct *CaptchaType) RecaptchaV3Proxyless() string  { return "RecaptchaV3TaskProxyless" }
+func (ct *CaptchaType) RecaptchaV2EnterpriseProxyless() string {
+	return "RecaptchaV2EnterpriseTaskProxyless"
+}
+func (ct *CaptchaType) RecaptchaV3EnterpriseProxyless() string {
+	return "RecaptchaV3EnterpriseTaskProxyless"
+}
+
+func NewProxy(proxyStr string, proxyType string) (*Proxy, error) {
+	p := &Proxy{
+		proxyStr:  proxyStr,
+		proxyType: proxyType,
+	}
+	parsed, err := p._format_proxy()
+	if err != nil {
+		return nil, err
+	}
+	p.parsedProxyDict = parsed
+	return p, nil
+}
+
+func (p *Proxy) _format_proxy() (map[string]interface{}, error) {
+	proxy := p.proxyStr
+	host, port, user, password := "", "", "", ""
+
+	if strings.Count(proxy, ":") == 3 {
+		parts := strings.Split(proxy, ":")
+		host, port, user, password = parts[0], parts[1], parts[2], parts[3]
+	} else if strings.Count(proxy, ":") == 1 {
+		parts := strings.Split(proxy, ":")
+		host, port = parts[0], parts[1]
+	} else if strings.Count(proxy, "@") == 1 && strings.Count(proxy, ":") == 2 {
+		parts := strings.Split(proxy, "@")
+		userPass := strings.Split(parts[0], ":")
+		hostPort := strings.Split(parts[1], ":")
+		user, password = userPass[0], userPass[1]
+		host, port = hostPort[0], hostPort[1]
+	} else {
+		return nil, errors.New("Invalid proxy format")
+	}
+
+	portInt, err := strconv.Atoi(port)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"proxyAddress":  host,
+		"proxyPort":     portInt,
+		"proxyLogin":    user,
+		"proxyPassword": password,
+		"proxyType":     p.proxyType,
+	}, nil
+}
 
 func NewEnigmaSolver(apiKey string, timeout int) *EnigmaSolver {
 	return &EnigmaSolver{
-		APIKey:  apiKey,
-		Timeout: time.Duration(timeout) * time.Second,
-		Client:  &http.Client{Timeout: time.Duration(timeout) * time.Second},
+		baseURL: "https://api.enigmasolver.net",
+		apiKey:  apiKey,
+		timeout: timeout,
+		client: &http.Client{
+			Timeout: time.Duration(timeout) * time.Second,
+		},
 	}
 }
 
-func (e *EnigmaSolver) GetBalance() (map[string]interface{}, error) {
-	return e.doRequest("POST", "/getBalance", map[string]string{"clientKey": e.APIKey})
+func (es *EnigmaSolver) GetBalance() (map[string]interface{}, error) {
+	resp, err := es._do_request("POST", "/getBalance", map[string]interface{}{"clientKey": es.apiKey})
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	err = json.Unmarshal(resp, &result)
+	return result, err
 }
 
-func (e *EnigmaSolver) ReCaptchaV2(websiteURL, websiteKey, recaptchaDataSValue string, isInvisible bool, apiDomain, pageAction string) (*Result, error) {
-	return e.processTask(map[string]interface{}{
-		"type":                RecaptchaV2,
+func (es *EnigmaSolver) ReCaptchaV2Proxyless(websiteURL, websiteKey, recaptchaDataSValue string, isInvisible bool, apiDomain, pageAction string) *Result {
+	postData := map[string]interface{}{
+		"type":                (&CaptchaType{}).RecaptchaV2Proxyless(),
 		"websiteURL":          websiteURL,
 		"websiteKey":          websiteKey,
 		"recaptchaDataSValue": recaptchaDataSValue,
 		"isInvisible":         isInvisible,
 		"apiDomain":           apiDomain,
 		"pageAction":          pageAction,
-	})
+	}
+	return es._process_task(postData)
 }
 
-func (e *EnigmaSolver) ReCaptchaV2Enterprise(websiteURL, websiteKey string, enterprisePayload map[string]interface{}, isInvisible bool, apiDomain, pageAction string) (*Result, error) {
-	return e.processTask(map[string]interface{}{
-		"type":              RecaptchaV2Enterprise,
+func (es *EnigmaSolver) ReCaptchaV2EnterpriseProxyless(websiteURL, websiteKey string, enterprisePayload map[string]interface{}, isInvisible bool, apiDomain, pageAction string) *Result {
+	postData := map[string]interface{}{
+		"type":              (&CaptchaType{}).RecaptchaV2EnterpriseProxyless(),
 		"websiteURL":        websiteURL,
 		"websiteKey":        websiteKey,
 		"enterprisePayload": enterprisePayload,
 		"isInvisible":       isInvisible,
 		"apiDomain":         apiDomain,
 		"pageAction":        pageAction,
-	})
+	}
+	return es._process_task(postData)
 }
 
-func (e *EnigmaSolver) ReCaptchaV3(websiteURL, websiteKey, pageAction, apiDomain string) (*Result, error) {
-	return e.processTask(map[string]interface{}{
-		"type":       RecaptchaV3,
+func (es *EnigmaSolver) ReCaptchaV3Proxyless(websiteURL, websiteKey, pageAction, apiDomain string) *Result {
+	postData := map[string]interface{}{
+		"type":       (&CaptchaType{}).RecaptchaV3Proxyless(),
 		"websiteURL": websiteURL,
 		"websiteKey": websiteKey,
 		"pageAction": pageAction,
 		"apiDomain":  apiDomain,
-	})
+	}
+	return es._process_task(postData)
 }
 
-func (e *EnigmaSolver) ReCaptchaV3Enterprise(websiteURL, websiteKey, pageAction, apiDomain string) (*Result, error) {
-	return e.processTask(map[string]interface{}{
-		"type":       RecaptchaV3Enterprise,
+func (es *EnigmaSolver) ReCaptchaV3EnterpriseProxyless(websiteURL, websiteKey, pageAction, apiDomain string) *Result {
+	postData := map[string]interface{}{
+		"type":       (&CaptchaType{}).RecaptchaV3EnterpriseProxyless(),
 		"websiteURL": websiteURL,
 		"websiteKey": websiteKey,
 		"pageAction": pageAction,
 		"apiDomain":  apiDomain,
-	})
+	}
+	return es._process_task(postData)
 }
 
-func (e *EnigmaSolver) doRequest(method, path string, postData interface{}) (map[string]interface{}, error) {
-	url := "https://api.enigmasolver.net" + path
-	jsonData, _ := json.Marshal(postData)
+func (es *EnigmaSolver) ReCaptchaV2Enterprise(websiteURL, websiteKey string, enterprisePayload map[string]interface{}, isInvisible bool, apiDomain, pageAction string, proxy *Proxy) *Result {
+	postData := map[string]interface{}{
+		"type":              (&CaptchaType{}).RecaptchaV2Enterprise(),
+		"websiteURL":        websiteURL,
+		"websiteKey":        websiteKey,
+		"enterprisePayload": enterprisePayload,
+		"isInvisible":       isInvisible,
+		"apiDomain":         apiDomain,
+		"pageAction":        pageAction,
+	}
+	for k, v := range proxy.parsedProxyDict {
+		postData[k] = v
+	}
+	return es._process_task(postData)
+}
 
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonData))
+func (es *EnigmaSolver) ReCaptchaV3(websiteURL, websiteKey, pageAction, apiDomain string, proxy *Proxy) *Result {
+	postData := map[string]interface{}{
+		"type":       (&CaptchaType{}).RecaptchaV3(),
+		"websiteURL": websiteURL,
+		"websiteKey": websiteKey,
+		"pageAction": pageAction,
+		"apiDomain":  apiDomain,
+	}
+	for k, v := range proxy.parsedProxyDict {
+		postData[k] = v
+	}
+	return es._process_task(postData)
+}
+
+func (es *EnigmaSolver) ReCaptchaV3Enterprise(websiteURL, websiteKey, pageAction, apiDomain string, proxy *Proxy) *Result {
+	postData := map[string]interface{}{
+		"type":       (&CaptchaType{}).RecaptchaV3Enterprise(),
+		"websiteURL": websiteURL,
+		"websiteKey": websiteKey,
+		"pageAction": pageAction,
+		"apiDomain":  apiDomain,
+	}
+	for k, v := range proxy.parsedProxyDict {
+		postData[k] = v
+	}
+	return es._process_task(postData)
+}
+
+func (es *EnigmaSolver) _do_request(method, path string, postData interface{}) ([]byte, error) {
+	var req *http.Request
+	var err error
+
+	if method == "GET" {
+		req, err = http.NewRequest("GET", es.baseURL+path, nil)
+	} else if method == "POST" {
+		body, err := json.Marshal(postData)
+		if err != nil {
+			return nil, err
+		}
+		req, err = http.NewRequest("POST", es.baseURL+path, bytes.NewBuffer(body))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+	} else {
+		return nil, errors.New("Invalid Method")
+	}
+
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.Client.Do(req)
+
+	resp, err := es.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
-	var result map[string]interface{}
-	json.Unmarshal(body, &result)
-	return result, nil
-}
-
-func (e *EnigmaSolver) processTask(postData map[string]interface{}) (*Result, error) {
-	resp, err := e.doRequest("POST", "/createTask", map[string]interface{}{
-		"clientKey": e.APIKey,
-		"task":      postData,
-	})
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	taskID := resp["taskId"].(float64)
 
-	startTime := time.Now()
-	for {
-		if time.Since(startTime) > e.Timeout {
-			return &Result{Status: "failed", ErrorId: "12", Error: "Timeout"}, nil
-		}
-		taskResp, err := e.doRequest("POST", "/getTaskResult", map[string]string{
-			"clientKey": e.APIKey,
-			"taskId":    fmt.Sprintf("%v", taskID),
-		})
-		if err != nil {
-			return nil, err
-		}
-		if taskResp["status"].(string) == "ready" || taskResp["status"].(string) == "failed" {
-			return e.processResponse(taskResp), nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+	return body, nil
 }
 
-func (e *EnigmaSolver) processResponse(response map[string]interface{}) *Result {
-	if response == nil {
-		return &Result{}
+func (es *EnigmaSolver) _process_response(response map[string]interface{}) *Result {
+	result := &Result{}
+	result.Status = response["status"].(string)
+	result.Solved = result.Status == "ready"
+	result.ErrorId = response["errorId"].(string)
+	result.Error = response["errorDescription"].(string)
+	if solution, ok := response["solution"].(map[string]interface{}); ok {
+		result.Solution = solution["gRecaptchaResponse"].(string)
 	}
-	status, _ := response["status"].(string)
-	errorId := fmt.Sprintf("%v", response["errorId"])
-	errorDesc := fmt.Sprintf("%v", response["errorDescription"])
-	var solution string
-	if solutionMap, ok := response["solution"].(map[string]interface{}); ok {
-		solution, _ = solutionMap["gRecaptchaResponse"].(string)
+	return result
+}
+
+func (es *EnigmaSolver) _process_task(postData map[string]interface{}) *Result {
+	data := map[string]interface{}{
+		"clientKey": es.apiKey,
+		"task":      postData,
 	}
-	return &Result{
-		Status:   status,
-		Solved:   status == "ready",
-		ErrorId:  errorId,
-		Error:    errorDesc,
-		Solution: solution,
+	resp, err := es._do_request("POST", "/createTask", data)
+	if err != nil {
+		return &Result{Error: err.Error()}
+	}
+
+	var respData map[string]interface{}
+	if err := json.Unmarshal(resp, &respData); err != nil {
+		return &Result{Error: err.Error()}
+	}
+
+	if respData["taskId"] == nil {
+		return es._process_response(respData)
+	}
+	taskID := respData["taskId"].(float64)
+	startTime := time.Now()
+
+	for {
+		if time.Since(startTime).Seconds() > float64(es.timeout) {
+			return es._process_response(map[string]interface{}{
+				"errorId":          "12",
+				"errorDescription": "Timeout",
+				"status":           "failed",
+			})
+		}
+
+		resp, err = es._do_request("POST", "/getTaskResult", map[string]interface{}{
+			"clientKey": es.apiKey,
+			"taskId":    taskID,
+		})
+		if err != nil {
+			return &Result{Error: err.Error()}
+		}
+
+		if err := json.Unmarshal(resp, &respData); err != nil {
+			return &Result{Error: err.Error()}
+		}
+
+		status := respData["status"].(string)
+		if status == "ready" || status == "failed" {
+			return es._process_response(respData)
+		}
+
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
 func main() {
 	apiKey := "your_key"
 	enigmaSolver := NewEnigmaSolver(apiKey, 60)
-	balance, _ := enigmaSolver.GetBalance()
-	fmt.Println("Balance:", balance)
-	solved, err := enigmaSolver.ReCaptchaV2("6Le-wvkSAAAAAPBMRTvw0Q4M1uexq9bi0DJwx_mJ-", "https://www.google.com/recaptcha/api2/demo", "", false, "", "")
+	balance, err := enigmaSolver.GetBalance()
 	if err != nil {
-		println(fmt.Sprintf("Error: %s", err.Error()))
+		fmt.Println("Error getting balance:", err)
 	} else {
-		println(fmt.Sprintf("Solution: %s", solved.Solution))
-		println(fmt.Sprintf("ErrorId: %s", solved.ErrorId))
-		println(fmt.Sprintf("Error: %s", solved.Error))
-		println(fmt.Sprintf("Solved: %s", strconv.FormatBool(solved.Solved)))
-		println(fmt.Sprintf("Status: %s", solved.Status))
+		fmt.Println(balance)
 	}
+
+	// PROXY TASK
+	proxy, err := NewProxy("username:password@proxy_ip:port", (&ProxyType{}).HTTP())
+	if err != nil {
+		fmt.Println("Error creating proxy:", err)
+		return
+	}
+	task := enigmaSolver.ReCaptchaV3(
+		"https://www.example.com/",
+		"6Le-wvkSAAAAAPBMRTvw0Q4M1uexq9bi0DJwx_mJ-",
+		"",
+		"",
+		proxy,
+	)
+	fmt.Println("Task Status:", task.Status)
+	fmt.Println("Task Solved:", task.Solved)
+	fmt.Println("Task Error:", task.Error)
+	fmt.Println("Task ErrorId:", task.ErrorId)
+	fmt.Println("Task Solution:", task.Solution)
+
+	// PROXYLESS TASK
+	task = enigmaSolver.ReCaptchaV2Proxyless(
+		"https://www.example.com/",
+		"6Le-wvkSAAAAAPBMRTvw0Q4M1uexq9bi0DJwx_mJ-",
+		"",
+		false,
+		"",
+		"",
+	)
+	fmt.Println("Task Status:", task.Status)
+	fmt.Println("Task Solved:", task.Solved)
+	fmt.Println("Task Error:", task.Error)
+	fmt.Println("Task ErrorId:", task.ErrorId)
+	fmt.Println("Task Solution:", task.Solution)
 }

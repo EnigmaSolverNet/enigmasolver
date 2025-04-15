@@ -2,6 +2,32 @@ import requests
 import time
 
 class EnigmaSolver:
+    class Proxy:
+        class ProxyType:
+            HTTP = "http"
+            SOCKS4 = "socks4"
+            SOCKS5 = "socks5"
+
+        def __init__(self, proxy_str: str, proxy_type: ProxyType):
+            self.proxy_str = proxy_str
+            self.proxy_type = proxy_type
+            parsed = self._format_proxy()
+            self.parsed_proxy_dict = parsed
+
+        def _format_proxy(self) -> tuple:
+            proxy = self.proxy_str
+            host, port, user, password = "", "", "", ""
+            if proxy.count(":") == 3:
+                host, port, user, password = proxy.split(":")
+            elif proxy.count(":") == 1:
+                host, port = proxy.split(":")
+            elif proxy.count("@") == 1 and proxy.count(":") == 2:
+                user, password = proxy.split("@")[0].split(":")
+                host, port = proxy.split("@")[1].split(":")
+            else:
+                raise ValueError("Invalid proxy format")
+            return {"proxyAddress": host, "proxyPort": int(port), "proxyLogin": user, "proxyPassword": password, "proxyType": self.proxy_type}
+        
     class Result:
         def __init__(self):
             self.Status = ""
@@ -11,10 +37,14 @@ class EnigmaSolver:
             self.Solution = ""
     
     class CaptchaType:
-        RecaptchaV2 = "RecaptchaV2TaskProxyless"
-        RecaptchaV3 = "RecaptchaV3TaskProxyless"
-        RecaptchaV2Enterprise = "RecaptchaV2EnterpriseTaskProxyless"
-        RecaptchaV3Enterprise = "RecaptchaV3EnterpriseTaskProxyless"
+        RecaptchaV3 = "RecaptchaV3Task"
+        RecaptchaV2Enterprise = "RecaptchaV2EnterpriseTask"
+        RecaptchaV3Enterprise = "RecaptchaV3EnterpriseTask"
+
+        RecaptchaV2Proxyless = "RecaptchaV2TaskProxyless"
+        RecaptchaV3Proxyless = "RecaptchaV3TaskProxyless"
+        RecaptchaV2EnterpriseProxyless = "RecaptchaV2EnterpriseTaskProxyless"
+        RecaptchaV3EnterpriseProxyless = "RecaptchaV3EnterpriseTaskProxyless"
         
     def __init__(self, api_key: str, timeout: int = 60):
         self.base_url = "https://api.enigmasolver.net"
@@ -26,10 +56,10 @@ class EnigmaSolver:
     def GetBalance(self):
         return self._do_request("POST", "/getBalance", post_data={"clientKey": self.api_key}).json()
     
-    def ReCaptchaV2(self, website_url: str, website_key: str, recaptcha_data_s_value: str = "",
+    def ReCaptchaV2Proxyless(self, website_url: str, website_key: str, recaptcha_data_s_value: str = "",
                     is_invisible: bool = False, api_domain: str = "", page_action: str = "") -> Result:
         post_data = {
-            "type": self.CaptchaType.RecaptchaV2,
+            "type": self.CaptchaType.RecaptchaV2Proxyless,
             "websiteURL": website_url,
             "websiteKey": website_key,
             "recaptchaDataSValue": recaptcha_data_s_value,
@@ -39,10 +69,10 @@ class EnigmaSolver:
         }
         return self._process_task(post_data=post_data)
     
-    def ReCaptchaV2Enterprise(self, website_url: str, website_key: str, enterprise_payload: dict = {},
+    def ReCaptchaV2EnterpriseProxyless(self, website_url: str, website_key: str, enterprise_payload: dict = {},
                               is_invisible: bool = False, api_domain: str = "", page_action: str = "") -> Result:
         post_data = {
-            "type": self.CaptchaType.RecaptchaV2Enterprise,
+            "type": self.CaptchaType.RecaptchaV2EnterpriseProxyless,
             "websiteURL": website_url,
             "websiteKey": website_key,
             "enterprisePayload": enterprise_payload,
@@ -53,9 +83,9 @@ class EnigmaSolver:
         }
         return self._process_task(post_data=post_data)
     
-    def ReCaptchaV3(self, website_url: str, website_key: str, page_action: str = "", api_domain: str = "") -> Result:
+    def ReCaptchaV3Proxyless(self, website_url: str, website_key: str, page_action: str = "", api_domain: str = "") -> Result:
         post_data = {
-            "type": self.CaptchaType.RecaptchaV3,
+            "type": self.CaptchaType.RecaptchaV3Proxyless,
             "websiteURL": website_url,
             "websiteKey": website_key,
             "pageAction": page_action,
@@ -63,7 +93,42 @@ class EnigmaSolver:
         }
         return self._process_task(post_data=post_data)
     
-    def ReCaptchaV3Enterprise(self, website_url: str, website_key: str, page_action: str = "", api_domain: str = "") -> Result:
+    def ReCaptchaV3EnterpriseProxyless(self, website_url: str, website_key: str, page_action: str = "", api_domain: str = "") -> Result:
+        post_data = {
+            "type": self.CaptchaType.RecaptchaV3EnterpriseProxyless,
+            "websiteURL": website_url,
+            "websiteKey": website_key,
+            "pageAction": page_action,
+            "apiDomain": api_domain
+        }
+        return self._process_task(post_data=post_data)
+    
+    def ReCaptchaV2Enterprise(self, website_url: str, website_key: str, enterprise_payload: dict = {},
+                              is_invisible: bool = False, api_domain: str = "", page_action: str = "", proxy=Proxy) -> Result:
+        post_data = {
+            "type": self.CaptchaType.RecaptchaV2Enterprise,
+            "websiteURL": website_url,
+            "websiteKey": website_key,
+            "enterprisePayload": enterprise_payload,
+            "isInvisible": is_invisible,
+            "apiDomain": api_domain,
+            "pageAction": page_action
+        }
+        post_data.update(proxy.parsed_proxy_dict)
+        return self._process_task(post_data=post_data)
+    
+    def ReCaptchaV3(self, website_url: str, website_key: str, page_action: str = "", api_domain: str = "", proxy=Proxy) -> Result:
+        post_data = {
+            "type": self.CaptchaType.RecaptchaV3,
+            "websiteURL": website_url,
+            "websiteKey": website_key,
+            "pageAction": page_action,
+            "apiDomain": api_domain
+        }
+        post_data.update(proxy.parsed_proxy_dict)
+        return self._process_task(post_data=post_data)
+    
+    def ReCaptchaV3Enterprise(self, website_url: str, website_key: str, page_action: str = "", api_domain: str = "", proxy=Proxy) -> Result:
         post_data = {
             "type": self.CaptchaType.RecaptchaV3Enterprise,
             "websiteURL": website_url,
@@ -71,6 +136,7 @@ class EnigmaSolver:
             "pageAction": page_action,
             "apiDomain": api_domain
         }
+        post_data.update(proxy.parsed_proxy_dict)
         return self._process_task(post_data=post_data)
     
     
@@ -116,13 +182,34 @@ class EnigmaSolver:
             time.sleep(0.5)
     
     
-# example  
-ak = "your_key"
-enigmaSolver = EnigmaSolver(api_key=ak, timeout=60)
-print(enigmaSolver.GetBalance()) # GetBalance
-task = enigmaSolver.ReCaptchaV2(website_key="6Le-wvkSAAAAAPBMRTvw0Q4M1uexq9bi0DJwx_mJ-", website_url="https://www.google.com/recaptcha/api2/demo")
-print("Task Status: "+task.Status)
-print("Task Solved: "+str(task.Solved))
-print("Task Error: "+task.Error)
-print("Task ErrorId: "+str(task.ErrorId))
-print("Task Solution: "+task.Solution)
+# USAGE EXAMPLE
+if __name__ == "__main__":  
+    apikey = "your_key"
+    enigmaSolver = EnigmaSolver(api_key=apikey, timeout=60)
+    print(enigmaSolver.GetBalance()) # GetBalance
+
+    # PROXY TASK
+    proxy = enigmaSolver.Proxy("username:password@proxy_ip:port", enigmaSolver.Proxy.ProxyType.HTTP)
+    #proxy = enigmaSolver.Proxy("proxy_ip:port", enigmaSolver.Proxy.ProxyType.SOCKS4)
+    #proxy = enigmaSolver.Proxy("proxy_ip:port:username:password", enigmaSolver.Proxy.ProxyType.SOCKS5)
+    task = enigmaSolver.ReCaptchaV3(
+        website_key="6Le-wvkSAAAAAPBMRTvw0Q4M1uexq9bi0DJwx_mJ-", 
+        website_url="https://www.example.com/", 
+        proxy=proxy
+        )
+    print("Task Status: "+task.Status)
+    print("Task Solved: "+str(task.Solved))
+    print("Task Error: "+task.Error)
+    print("Task ErrorId: "+str(task.ErrorId))
+    print("Task Solution: "+task.Solution)
+
+    # PROXYLESS TASK
+    task = enigmaSolver.ReCaptchaV2Proxyless(
+        website_key="6Le-wvkSAAAAAPBMRTvw0Q4M1uexq9bi0DJwx_mJ-", 
+        website_url="https://www.example.com/",
+        )
+    print("Task Status: "+task.Status)
+    print("Task Solved: "+str(task.Solved))
+    print("Task Error: "+task.Error)
+    print("Task ErrorId: "+str(task.ErrorId))
+    print("Task Solution: "+task.Solution)

@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 
 public class EnigmaSolver
@@ -105,13 +107,13 @@ public class EnigmaSolver
         client.DefaultRequestHeaders.Add("Content-Type", "application/json");
     }
 
-    public Dictionary<string, object> GetBalance()
+    public async Task<Dictionary<string, object>> GetBalance()
     {
-        var response = _do_request("POST", "/getBalance", new Dictionary<string, object> { { "clientKey", apiKey } });
+        var response = await _do_request("POST", "/getBalance", new Dictionary<string, object> { { "clientKey", apiKey } });
         return JsonConvert.DeserializeObject<Dictionary<string, object>>(response);
     }
 
-    public Result ReCaptchaV2Proxyless(string websiteUrl, string websiteKey, string recaptchaDataSValue = "",
+    public async Task<Result> ReCaptchaV2Proxyless(string websiteUrl, string websiteKey, string recaptchaDataSValue = "",
         bool isInvisible = false, string apiDomain = "", string pageAction = "")
     {
         var postData = new Dictionary<string, object>
@@ -124,10 +126,10 @@ public class EnigmaSolver
             { "apiDomain", apiDomain },
             { "pageAction", pageAction }
         };
-        return _process_task(postData);
+        return await _process_task(postData);
     }
 
-    public Result ReCaptchaV2EnterpriseProxyless(string websiteUrl, string websiteKey,
+    public async Task<Result> ReCaptchaV2EnterpriseProxyless(string websiteUrl, string websiteKey,
         Dictionary<string, object> enterprisePayload = null, bool isInvisible = false, string apiDomain = "", string pageAction = "")
     {
         enterprisePayload = enterprisePayload ?? new Dictionary<string, object>();
@@ -141,10 +143,10 @@ public class EnigmaSolver
             { "apiDomain", apiDomain },
             { "pageAction", pageAction }
         };
-        return _process_task(postData);
+        return await _process_task(postData);
     }
 
-    public Result ReCaptchaV3Proxyless(string websiteUrl, string websiteKey, string pageAction = "", string apiDomain = "")
+    public async Task<Result> ReCaptchaV3Proxyless(string websiteUrl, string websiteKey, string pageAction = "", string apiDomain = "")
     {
         var postData = new Dictionary<string, object>
         {
@@ -154,10 +156,10 @@ public class EnigmaSolver
             { "pageAction", pageAction },
             { "apiDomain", apiDomain }
         };
-        return _process_task(postData);
+        return await _process_task(postData);
     }
 
-    public Result ReCaptchaV3EnterpriseProxyless(string websiteUrl, string websiteKey, string pageAction = "", string apiDomain = "")
+    public async Task<Result> ReCaptchaV3EnterpriseProxyless(string websiteUrl, string websiteKey, string pageAction = "", string apiDomain = "")
     {
         var postData = new Dictionary<string, object>
         {
@@ -167,11 +169,12 @@ public class EnigmaSolver
             { "pageAction", pageAction },
             { "apiDomain", apiDomain }
         };
-        return _process_task(postData);
+        return await _process_task(postData);
     }
 
+   
 
-    public Result ReCaptchaV2Enterprise(string websiteUrl, string websiteKey,
+    public async Task<Result> ReCaptchaV2Enterprise(string websiteUrl, string websiteKey,
         Dictionary<string, object> enterprisePayload = null, bool isInvisible = false, string apiDomain = "", string pageAction = "", Proxy proxy = null)
     {
         enterprisePayload = enterprisePayload ?? new Dictionary<string, object>();
@@ -192,10 +195,10 @@ public class EnigmaSolver
                 postData[kvp.Key] = kvp.Value;
             }
         }
-        return _process_task(postData);
+        return await _process_task(postData);
     }
 
-    public Result ReCaptchaV3(string websiteUrl, string websiteKey, string pageAction = "", string apiDomain = "", Proxy proxy = null)
+    public async Task<Result> ReCaptchaV3(string websiteUrl, string websiteKey, string pageAction = "", string apiDomain = "", Proxy proxy = null)
     {
         var postData = new Dictionary<string, object>
         {
@@ -212,10 +215,10 @@ public class EnigmaSolver
                 postData[kvp.Key] = kvp.Value;
             }
         }
-        return _process_task(postData);
+        return await _process_task(postData);
     }
 
-    public Result ReCaptchaV3Enterprise(string websiteUrl, string websiteKey, string pageAction = "", string apiDomain = "", Proxy proxy = null)
+    public async Task<Result> ReCaptchaV3Enterprise(string websiteUrl, string websiteKey, string pageAction = "", string apiDomain = "", Proxy proxy = null)
     {
         var postData = new Dictionary<string, object>
         {
@@ -232,28 +235,28 @@ public class EnigmaSolver
                 postData[kvp.Key] = kvp.Value;
             }
         }
-        return _process_task(postData);
+        return await _process_task(postData);
     }
 
-    private string _do_request(string method, string path, object postData = null)
+    private async Task<string> _do_request(string method, string path, object postData = null)
     {
         HttpResponseMessage response;
         if (method == "GET")
         {
-            response = client.GetAsync(baseUrl + path).Result;
+            response = await client.GetAsync(baseUrl + path);
         }
         else if (method == "POST")
         {
             var json = JsonConvert.SerializeObject(postData);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            response = client.PostAsync(baseUrl + path, content).Result;
+            response = await client.PostAsync(baseUrl + path, content);
         }
         else
         {
             throw new ArgumentException("Invalid Method");
         }
 
-        return response.Content.ReadAsStringAsync().Result;
+        return await response.Content.ReadAsStringAsync();
     }
 
     private Result _process_response(Dictionary<string, object> response)
@@ -270,7 +273,7 @@ public class EnigmaSolver
         return result;
     }
 
-    private Result _process_task(Dictionary<string, object> postData)
+    private async Task<Result> _process_task(Dictionary<string, object> postData)
     {
         var data = new Dictionary<string, object>
         {
@@ -278,7 +281,7 @@ public class EnigmaSolver
             { "task", postData }
         };
 
-        var resp = _do_request("POST", "/createTask", data);
+        var resp = await _do_request("POST", "/createTask", data);
         var respData = JsonConvert.DeserializeObject<Dictionary<string, object>>(resp);
 
         if (!respData.ContainsKey("taskId"))
@@ -301,7 +304,7 @@ public class EnigmaSolver
                 });
             }
 
-            resp = _do_request("POST", "/getTaskResult", new Dictionary<string, object>
+            resp = await _do_request("POST", "/getTaskResult", new Dictionary<string, object>
             {
                 { "clientKey", apiKey },
                 { "taskId", taskId }
@@ -314,22 +317,22 @@ public class EnigmaSolver
                 return _process_response(respData);
             }
 
-            System.Threading.Thread.Sleep(500);
+            await Task.Delay(500);
         }
     }
 
     // USAGE EXAMPLE
-    public static void Main()
+    public static async Task Main()
     {
         string apiKey = "your_key";
         var enigmaSolver = new EnigmaSolver(apiKey, 60);
-        Console.WriteLine(JsonConvert.SerializeObject(enigmaSolver.GetBalance()));
+        Console.WriteLine(JsonConvert.SerializeObject(await enigmaSolver.GetBalance()));
 
         // PROXY TASK
         var proxy = new Proxy("username:password@proxy_ip:port", Proxy.ProxyType.HTTP);
         //var proxy = new Proxy("proxy_ip:port", Proxy.ProxyType.SOCKS4);
         //var proxy = new Proxy("proxy_ip:port:username:password", Proxy.ProxyType.SOCKS5);
-        var task = enigmaSolver.ReCaptchaV3(
+        var task = await enigmaSolver.ReCaptchaV3(
             websiteUrl: "https://www.example.com/",
             websiteKey: "6Le-wvkSAAAAAPBMRTvw0Q4M1uexq9bi0DJwx_mJ-",
             proxy: proxy
@@ -341,7 +344,7 @@ public class EnigmaSolver
         Console.WriteLine($"Task Solution: {task.Solution}");
 
         // PROXYLESS TASK
-        task = enigmaSolver.ReCaptchaV2Proxyless(
+        task = await enigmaSolver.ReCaptchaV2Proxyless(
             websiteUrl: "https://www.example.com/",
             websiteKey: "6Le-wvkSAAAAAPBMRTvw0Q4M1uexq9bi0DJwx_mJ-"
         );
